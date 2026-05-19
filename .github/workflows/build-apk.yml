@@ -90,16 +90,24 @@ jobs:
       - name: Patch MainApplication.kt - register BotPackage
         run: |
           MAIN=$(find android -name "MainApplication.kt" | head -1)
-          echo "=== MainApplication.kt BEFORE patch ==="
-          cat "$MAIN"
-          echo "=== End ==="
+          echo "Patching: $MAIN"
 
           if grep -q "BotPackage" "$MAIN"; then
             echo "Already patched"
+
+          elif grep -q "packages.apply {" "$MAIN"; then
+            # Form: PackageList(this).packages.apply { ... }
+            # Insert add(BotPackage()) as first line inside the apply block
+            sed -i 's|packages\.apply {|packages.apply {\n              add(BotPackage())|' "$MAIN"
+            echo "Patched: .apply{} form"
+
           elif grep -q "val packages = PackageList(this).packages" "$MAIN"; then
+            # Form: val packages = ...; return packages
             sed -i '/val packages = PackageList(this)\.packages/a\          packages.add(BotPackage())' "$MAIN"
-            echo "Patched: inserted after block form"
+            echo "Patched: block form"
+
           elif grep -q "= PackageList(this).packages" "$MAIN"; then
+            # Form: single-expression = PackageList(this).packages
             python3 - "$MAIN" << 'PYEOF'
           import sys, re
           path = sys.argv[1]
@@ -118,15 +126,17 @@ jobs:
           new = re.sub(pattern, repl, content)
           with open(path, 'w') as f:
               f.write(new)
-          print("Patched: single-expression form converted to block")
+          print("Patched: single-expression form")
           PYEOF
+
           else
             echo "ERROR: Could not find getPackages pattern"
+            cat "$MAIN"
             exit 1
           fi
 
-          echo "=== MainApplication.kt AFTER patch ==="
-          cat "$MAIN"
+          echo "=== Result ==="
+          grep -A 6 "getPackages" "$MAIN" || true
 
       - name: Gradle build
         run: |
