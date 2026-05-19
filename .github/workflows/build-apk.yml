@@ -1,109 +1,118 @@
 name: Build Android APK
 
-on:
-  push:
-    branches: [main, master]
-  workflow_dispatch:
+  on:
+    push:
+      branches: [main, master]
+    workflow_dispatch:
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+  jobs:
+    build:
+      runs-on: ubuntu-latest
+      timeout-minutes: 90
 
-    steps:
-      - uses: actions/checkout@v4
+      steps:
+        - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+        - uses: actions/setup-node@v4
+          with:
+            node-version: "20"
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
+        - uses: actions/setup-java@v4
+          with:
+            distribution: "temurin"
+            java-version: "17"
 
-      - name: Install deps
-        run: npm install --legacy-peer-deps
+        - name: Install deps
+          run: npm install --legacy-peer-deps
 
-      - name: Install Expo CLI
-        run: npm install -g @expo/cli@latest
+        - name: Install Expo CLI
+          run: npm install -g @expo/cli@latest
 
-      - name: Expo Prebuild
-        run: npx expo prebuild --platform android --clean
-        env:
-          EXPO_NO_TELEMETRY: 1
+        - name: Expo Prebuild
+          run: npx expo prebuild --platform android --clean
+          env:
+            EXPO_NO_TELEMETRY: 1
 
-      - name: Copy Kotlin files
-        run: |
-          PKG="android/app/src/main/java/com/beachtilebot"
-          mkdir -p "$PKG"
-          cp plugins/android-src/BotAccessibilityService.kt "$PKG/"
-          cp plugins/android-src/BotModule.kt "$PKG/"
-          cp plugins/android-src/BotPackage.kt "$PKG/"
-          cp plugins/android-src/BotForegroundService.kt "$PKG/"
-          echo "Kotlin files:"
-          ls "$PKG/"
+        - name: Copy Kotlin files
+          run: |
+            PKG="android/app/src/main/java/com/beachtilebot"
+            mkdir -p "$PKG"
+            cp plugins/android-src/BotAccessibilityService.kt "$PKG/"
+            cp plugins/android-src/BotModule.kt "$PKG/"
+            cp plugins/android-src/BotPackage.kt "$PKG/"
+            cp plugins/android-src/BotForegroundService.kt "$PKG/"
+            echo "Kotlin files:"
+            ls "$PKG/"
 
-      - name: Copy accessibility XML
-        run: |
-          mkdir -p android/app/src/main/res/xml
-          cp plugins/android-src/accessibility_service_config.xml android/app/src/main/res/xml/
+        - name: Copy accessibility XML
+          run: |
+            mkdir -p android/app/src/main/res/xml
+            cp plugins/android-src/accessibility_service_config.xml android/app/src/main/res/xml/
 
-      - name: Add accessibility string resource
-        run: |
-          FILE="android/app/src/main/res/values/strings.xml"
-          if grep -q "accessibility_service_description" "$FILE" 2>/dev/null; then
-            echo "String already exists"
-          else
-            sed -i 's|</resources>|    <string name="accessibility_service_description">Beach Tile Bot automatiza cliques no Beach Tile Match para coletar recompensas.</string>\n</resources>|' "$FILE" || true
-          fi
+        - name: Add accessibility string resource
+          run: |
+            FILE="android/app/src/main/res/values/strings.xml"
+            if grep -q "accessibility_service_description" "$FILE" 2>/dev/null; then
+              echo "String already exists"
+            else
+              sed -i 's|</resources>|    <string name="accessibility_service_description">Beach Tile Bot automatiza cliques no Beach Tile Match para coletar recompensas.</string>\n</resources>|' "$FILE" || true
+            fi
 
-      - name: Patch AndroidManifest - permissions
-        run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if grep -q "SYSTEM_ALERT_WINDOW" "$MANIFEST"; then
-            echo "Permissions already present"
-          else
-            sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n</manifest>|' "$MANIFEST"
-          fi
+        - name: Patch AndroidManifest - permissions
+          run: |
+            MANIFEST="android/app/src/main/AndroidManifest.xml"
+            if grep -q "SYSTEM_ALERT_WINDOW" "$MANIFEST"; then
+              echo "Permissions already present"
+            else
+              sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n</manifest>|' "$MANIFEST"
+            fi
 
-      - name: Patch AndroidManifest - accessibility service
-        run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if grep -q "BotAccessibilityService" "$MANIFEST"; then
-            echo "Accessibility service already declared"
-          else
-            sed -i 's|</application>|        <service android:name=".BotAccessibilityService" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:label="Beach Tile Bot"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config"/></service>\n    </application>|' "$MANIFEST"
-          fi
+        - name: Patch AndroidManifest - accessibility service
+          run: |
+            MANIFEST="android/app/src/main/AndroidManifest.xml"
+            if grep -q "BotAccessibilityService" "$MANIFEST"; then
+              echo "Accessibility service already declared"
+            else
+              sed -i 's|</application>|        <service android:name=".BotAccessibilityService" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:label="Beach Tile Bot"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config"/></service>\n    </application>|' "$MANIFEST"
+            fi
 
-      - name: Patch AndroidManifest - foreground service
-        run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if grep -q "BotForegroundService" "$MANIFEST"; then
-            echo "Foreground service already declared"
-          else
-            sed -i 's|</application>|        <service android:name=".BotForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />\n    </application>|' "$MANIFEST"
-          fi
-          echo "Final manifest:"
-          cat "$MANIFEST"
+        - name: Patch AndroidManifest - foreground service
+          run: |
+            MANIFEST="android/app/src/main/AndroidManifest.xml"
+            if grep -q "BotForegroundService" "$MANIFEST"; then
+              echo "Foreground service already declared"
+            else
+              sed -i 's|</application>|        <service android:name=".BotForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />\n    </application>|' "$MANIFEST"
+            fi
+            echo "Final manifest:"
+            cat "$MANIFEST"
 
-      - name: Patch MainApplication.kt - register BotPackage
-        run: |
-          MAIN=$(find android -name "MainApplication.kt" | head -1)
-          echo "Patching: $MAIN"
-          python3 scripts/patch-main-app.py "$MAIN"
-          echo "Result:"
-          grep -A 6 "getPackages" "$MAIN" || true
+        - name: Patch MainApplication.kt - register BotPackage
+          run: |
+            MAIN=$(find android -name "MainApplication.kt" | head -1)
+            echo "Patching: $MAIN"
+            python3 scripts/patch-main-app.py "$MAIN"
+            echo "Result:"
+            grep -A 6 "getPackages" "$MAIN" || true
 
-      - name: Gradle build
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon 2>&1 | tail -80
-        working-directory: android
-        env:
-          GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
+        - name: Gradle build
+          run: |
+            set -o pipefail
+            chmod +x gradlew
+            ./gradlew assembleDebug --no-daemon 2>&1 | tail -200
+          working-directory: android
+          env:
+            GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BeachTileBot-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+        - name: Verificar APK gerado
+          run: |
+            echo "Procurando APK..."
+            find android/app/build/outputs -name "*.apk" 2>/dev/null || echo "Nenhum APK encontrado"
+
+        - name: Upload APK
+          uses: actions/upload-artifact@v4
+          with:
+            name: BeachTileBot-debug-apk
+            path: android/app/build/outputs/apk/debug/app-debug.apk
+            retention-days: 30
+  
