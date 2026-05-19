@@ -11,161 +11,90 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Install dependencies
+      - name: Install deps
         run: npm install --legacy-peer-deps
 
       - name: Install Expo CLI
         run: npm install -g @expo/cli@latest
 
-      - name: Run Expo Prebuild
+      - name: Expo Prebuild
         run: npx expo prebuild --platform android --clean
         env:
           EXPO_NO_TELEMETRY: 1
 
-      - name: Inject Kotlin source files
+      - name: Copy Kotlin files
         run: |
-          PKG_DIR="android/app/src/main/java/com/beachtilebot"
-          mkdir -p "$PKG_DIR"
-          echo "Copying Kotlin files to $PKG_DIR"
-          cp plugins/android-src/BotAccessibilityService.kt "$PKG_DIR/"
-          cp plugins/android-src/BotModule.kt "$PKG_DIR/"
-          cp plugins/android-src/BotPackage.kt "$PKG_DIR/"
-          echo "Kotlin files copied:"
-          ls "$PKG_DIR/"
+          PKG="android/app/src/main/java/com/beachtilebot"
+          mkdir -p "$PKG"
+          cp plugins/android-src/BotAccessibilityService.kt "$PKG/"
+          cp plugins/android-src/BotModule.kt "$PKG/"
+          cp plugins/android-src/BotPackage.kt "$PKG/"
 
-      - name: Inject accessibility service XML
+      - name: Copy accessibility XML
         run: |
-          XML_DIR="android/app/src/main/res/xml"
-          mkdir -p "$XML_DIR"
-          cp plugins/android-src/accessibility_service_config.xml "$XML_DIR/"
-          echo "XML config copied."
+          mkdir -p android/app/src/main/res/xml
+          cp plugins/android-src/accessibility_service_config.xml android/app/src/main/res/xml/
 
-      - name: Add accessibility description string
+      - name: Add string resource
         run: |
-          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
-          if [ -f "$STRINGS_FILE" ]; then
-            if ! grep -q "accessibility_service_description" "$STRINGS_FILE"; then
-              sed -i 's|</resources>|    <string name="accessibility_service_description">Beach Tile Bot: automatiza cliques no Beach Tile Match para coletar recompensas de anuncios.</string>\n</resources>|' "$STRINGS_FILE"
-              echo "Added accessibility string to strings.xml"
-            fi
+          FILE="android/app/src/main/res/values/strings.xml"
+          if grep -q "accessibility_service_description" "$FILE" 2>/dev/null; then
+            echo "String already exists"
           else
-            mkdir -p "android/app/src/main/res/values"
-            cat > "$STRINGS_FILE" << 'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">Beach Tile Bot</string>
-    <string name="accessibility_service_description">Beach Tile Bot: automatiza cliques no Beach Tile Match para coletar recompensas de anuncios.</string>
-</resources>
-EOF
+            sed -i 's|</resources>|    <string name="accessibility_service_description">Beach Tile Bot automatiza cliques no Beach Tile Match para coletar recompensas.</string>\n</resources>|' "$FILE" || echo "Could not update strings.xml"
           fi
 
-      - name: Update AndroidManifest.xml
+      - name: Patch AndroidManifest - permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          echo "Current manifest:"
-          cat "$MANIFEST"
-          
-          # Add permissions before </manifest>
-          if ! grep -q "SYSTEM_ALERT_WINDOW" "$MANIFEST"; then
-            sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n</manifest>|' "$MANIFEST"
+          if grep -q "SYSTEM_ALERT_WINDOW" "$MANIFEST"; then
+            echo "Permissions already present"
+          else
+            sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n</manifest>|' "$MANIFEST"
           fi
 
-          # Add accessibility service before </application>
-          if ! grep -q "BotAccessibilityService" "$MANIFEST"; then
-            sed -i 's|</application>|        <service\n            android:name=".BotAccessibilityService"\n            android:exported="true"\n            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"\n            android:label="Beach Tile Bot">\n            <intent-filter>\n                <action android:name="android.accessibilityservice.AccessibilityService" />\n            </intent-filter>\n            <meta-data\n                android:name="android.accessibilityservice"\n                android:resource="@xml/accessibility_service_config" />\n        </service>\n    </application>|' "$MANIFEST"
-          fi
-          
-          echo "Updated manifest:"
-          cat "$MANIFEST"
-
-      - name: Register BotPackage in MainApplication.kt
+      - name: Patch AndroidManifest - service
         run: |
-          MAIN_APP=$(find android -name "MainApplication.kt" | head -1)
-          echo "Found: $MAIN_APP"
-          
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if grep -q "BotAccessibilityService" "$MANIFEST"; then
+            echo "Service already declared"
+          else
+            sed -i 's|</application>|        <service android:name=".BotAccessibilityService" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:label="Beach Tile Bot"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config"/></service>\n    </application>|' "$MANIFEST"
+          fi
+
+      - name: Patch MainApplication.kt
+        run: |
+          MAIN=$(find android -name "MainApplication.kt" | head -1)
           node -e "
-          const fs = require('fs');
-          const file = '$MAIN_APP';
-          let content = fs.readFileSync(file, 'utf8');
-          console.log('--- Current getPackages ---');
-          const match = content.match(/override fun getPackages[\s\S]{0,300}/);
-          if (match) console.log(match[0].slice(0,300));
-          
-          if (content.includes('BotPackage')) {
-            console.log('Already registered');
-            process.exit(0);
-          }
-          
-          // Try multiple replacement patterns
-          const replacements = [
-            [
-              'override fun getPackages(): List<ReactPackage> =\n          PackageList(this).packages',
-              'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'
-            ],
-            [
-              'override fun getPackages(): List<ReactPackage> = PackageList(this).packages',
-              'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'
-            ],
-          ];
-          
-          let patched = false;
-          for (const [from, to] of replacements) {
-            if (content.includes(from)) {
-              content = content.replace(from, to);
-              patched = true;
-              console.log('Patched with exact match');
-              break;
-            }
-          }
-          
-          if (!patched) {
-            // Regex fallback
-            const regex = /override fun getPackages\(\): List<ReactPackage>\s*=\s*\n?\s*PackageList\(this\)\.packages/;
-            if (regex.test(content)) {
-              content = content.replace(regex,
-                'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }');
-              patched = true;
-              console.log('Patched with regex');
-            }
-          }
-          
-          if (!patched) {
-            console.log('WARNING: Could not patch getPackages. Manual inspection needed.');
-            console.log('Full file content (first 2000 chars):');
-            console.log(content.slice(0, 2000));
-          }
-          
-          fs.writeFileSync(file, content);
-          console.log('Done');
+            var fs=require('fs');
+            var c=fs.readFileSync('$MAIN','utf8');
+            if(c.includes('BotPackage')){console.log('already patched');process.exit(0);}
+            var old1='override fun getPackages(): List<ReactPackage> =\n          PackageList(this).packages';
+            var old2='override fun getPackages(): List<ReactPackage> = PackageList(this).packages';
+            var rep='override fun getPackages(): List<ReactPackage> { val packages=PackageList(this).packages; packages.add(BotPackage()); return packages }';
+            if(c.includes(old1)){c=c.replace(old1,rep);}else if(c.includes(old2)){c=c.replace(old2,rep);}else{c=c.replace(/override fun getPackages\(\): List<ReactPackage>[^{]*PackageList\(this\)\.packages/,rep);}
+            fs.writeFileSync('$MAIN',c);
+            console.log('patched');
           "
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x android/gradlew
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: Gradle build
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
         working-directory: android
         env:
           GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      - name: List APK files
-        run: find android -name "*.apk" -type f
-
-      - name: Upload Debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: BeachTileBot-debug-apk
