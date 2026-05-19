@@ -90,10 +90,43 @@ jobs:
       - name: Patch MainApplication.kt - register BotPackage
         run: |
           MAIN=$(find android -name "MainApplication.kt" | head -1)
-          echo "Patching: $MAIN"
-          python3 scripts/patch-main-app.py "$MAIN"
-          echo "Result:"
-          grep -A 6 "getPackages" "$MAIN" || true
+          echo "=== MainApplication.kt BEFORE patch ==="
+          cat "$MAIN"
+          echo "=== End ==="
+
+          if grep -q "BotPackage" "$MAIN"; then
+            echo "Already patched"
+          elif grep -q "val packages = PackageList(this).packages" "$MAIN"; then
+            sed -i '/val packages = PackageList(this)\.packages/a\          packages.add(BotPackage())' "$MAIN"
+            echo "Patched: inserted after block form"
+          elif grep -q "= PackageList(this).packages" "$MAIN"; then
+            python3 - "$MAIN" << 'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          with open(path) as f:
+              content = f.read()
+          pattern = r'([ \t]*override fun getPackages\(\): List<ReactPackage>)\s*=\s*PackageList\(this\)\.packages'
+          def repl(m):
+              ind = re.match(r'[ \t]*', m.group(1)).group()
+              return (
+                  ind + 'override fun getPackages(): List<ReactPackage> {\n' +
+                  ind + '  val packages = PackageList(this).packages\n' +
+                  ind + '  packages.add(BotPackage())\n' +
+                  ind + '  return packages\n' +
+                  ind + '}'
+              )
+          new = re.sub(pattern, repl, content)
+          with open(path, 'w') as f:
+              f.write(new)
+          print("Patched: single-expression form converted to block")
+          PYEOF
+          else
+            echo "ERROR: Could not find getPackages pattern"
+            exit 1
+          fi
+
+          echo "=== MainApplication.kt AFTER patch ==="
+          cat "$MAIN"
 
       - name: Gradle build
         run: |
