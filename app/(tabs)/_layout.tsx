@@ -1,29 +1,11 @@
-import { Tabs } from "expo-router";
-import { Feather } from "@expo/vector-icons";
-import React from "react";
-import { useColors } from "@/hooks/useColors";
+import { Tabs } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
+import React from 'react';
 
 export default function TabLayout() {
-  const colors = useColors();
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.mutedForeground,
-        tabBarStyle: { backgroundColor: colors.background, borderTopColor: colors.border },
-        headerStyle: { backgroundColor: colors.background },
-        headerTintColor: colors.foreground,
-        headerShadowVisible: false,
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Bot",
-          headerShown: false,
-          tabBarIcon: ({ color }) => <Feather name="cpu" size={22} color={color} />,
-        }}
-      />
+    <Tabs screenOptions={{ tabBarStyle: { backgroundColor: '#052e16' }, tabBarActiveTintColor: '#22c55e', tabBarInactiveTintColor: '#6b7280', headerShown: false }}>
+      <Tabs.Screen name='index' options={{ title: 'Bot', tabBarIcon: ({ color, size }) => <MaterialIcons name='smart-toy' size={size} color={color} /> }} />
     </Tabs>
   );
 }
