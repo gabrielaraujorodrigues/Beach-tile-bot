@@ -31,48 +31,127 @@ jobs:
       - name: Install Expo CLI
         run: npm install -g @expo/cli@latest
 
-      - name: Run Expo Prebuild (Android only)
+      - name: Run Expo Prebuild
         run: npx expo prebuild --platform android --clean
         env:
           EXPO_NO_TELEMETRY: 1
 
-      - name: Patch MainApplication.kt to register BotPackage
+      - name: Inject Kotlin source files
+        run: |
+          PKG_DIR="android/app/src/main/java/com/beachtilebot"
+          mkdir -p "$PKG_DIR"
+          echo "Copying Kotlin files to $PKG_DIR"
+          cp plugins/android-src/BotAccessibilityService.kt "$PKG_DIR/"
+          cp plugins/android-src/BotModule.kt "$PKG_DIR/"
+          cp plugins/android-src/BotPackage.kt "$PKG_DIR/"
+          echo "Kotlin files copied:"
+          ls "$PKG_DIR/"
+
+      - name: Inject accessibility service XML
+        run: |
+          XML_DIR="android/app/src/main/res/xml"
+          mkdir -p "$XML_DIR"
+          cp plugins/android-src/accessibility_service_config.xml "$XML_DIR/"
+          echo "XML config copied."
+
+      - name: Add accessibility description string
+        run: |
+          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
+          if [ -f "$STRINGS_FILE" ]; then
+            if ! grep -q "accessibility_service_description" "$STRINGS_FILE"; then
+              sed -i 's|</resources>|    <string name="accessibility_service_description">Beach Tile Bot: automatiza cliques no Beach Tile Match para coletar recompensas de anuncios.</string>\n</resources>|' "$STRINGS_FILE"
+              echo "Added accessibility string to strings.xml"
+            fi
+          else
+            mkdir -p "android/app/src/main/res/values"
+            cat > "$STRINGS_FILE" << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Beach Tile Bot</string>
+    <string name="accessibility_service_description">Beach Tile Bot: automatiza cliques no Beach Tile Match para coletar recompensas de anuncios.</string>
+</resources>
+EOF
+          fi
+
+      - name: Update AndroidManifest.xml
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          echo "Current manifest:"
+          cat "$MANIFEST"
+          
+          # Add permissions before </manifest>
+          if ! grep -q "SYSTEM_ALERT_WINDOW" "$MANIFEST"; then
+            sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n</manifest>|' "$MANIFEST"
+          fi
+
+          # Add accessibility service before </application>
+          if ! grep -q "BotAccessibilityService" "$MANIFEST"; then
+            sed -i 's|</application>|        <service\n            android:name=".BotAccessibilityService"\n            android:exported="true"\n            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"\n            android:label="Beach Tile Bot">\n            <intent-filter>\n                <action android:name="android.accessibilityservice.AccessibilityService" />\n            </intent-filter>\n            <meta-data\n                android:name="android.accessibilityservice"\n                android:resource="@xml/accessibility_service_config" />\n        </service>\n    </application>|' "$MANIFEST"
+          fi
+          
+          echo "Updated manifest:"
+          cat "$MANIFEST"
+
+      - name: Register BotPackage in MainApplication.kt
         run: |
           MAIN_APP=$(find android -name "MainApplication.kt" | head -1)
-          echo "MainApplication path: $MAIN_APP"
-          cat "$MAIN_APP" | grep -n "getPackages" || true
+          echo "Found: $MAIN_APP"
+          
           node -e "
           const fs = require('fs');
-          const file = process.argv[1];
+          const file = '$MAIN_APP';
           let content = fs.readFileSync(file, 'utf8');
+          console.log('--- Current getPackages ---');
+          const match = content.match(/override fun getPackages[\s\S]{0,300}/);
+          if (match) console.log(match[0].slice(0,300));
+          
           if (content.includes('BotPackage')) {
-            console.log('BotPackage already registered');
-          } else {
-            const patterns = [
-              ['override fun getPackages(): List<ReactPackage> =\n          PackageList(this).packages',
-               'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'],
-              ['override fun getPackages(): List<ReactPackage> = PackageList(this).packages',
-               'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'],
-            ];
-            let patched = false;
-            for (const [old, replacement] of patterns) {
-              if (content.includes(old)) {
-                content = content.replace(old, replacement);
-                patched = true;
-                break;
-              }
-            }
-            if (!patched) {
-              // Regex fallback
-              content = content.replace(
-                /override fun getPackages\(\): List<ReactPackage> =[\s\S]*?PackageList\(this\)\.packages/,
-                'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'
-              );
-            }
-            fs.writeFileSync(file, content);
-            console.log('Patched:', file);
+            console.log('Already registered');
+            process.exit(0);
           }
-          " "$MAIN_APP"
+          
+          // Try multiple replacement patterns
+          const replacements = [
+            [
+              'override fun getPackages(): List<ReactPackage> =\n          PackageList(this).packages',
+              'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'
+            ],
+            [
+              'override fun getPackages(): List<ReactPackage> = PackageList(this).packages',
+              'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'
+            ],
+          ];
+          
+          let patched = false;
+          for (const [from, to] of replacements) {
+            if (content.includes(from)) {
+              content = content.replace(from, to);
+              patched = true;
+              console.log('Patched with exact match');
+              break;
+            }
+          }
+          
+          if (!patched) {
+            // Regex fallback
+            const regex = /override fun getPackages\(\): List<ReactPackage>\s*=\s*\n?\s*PackageList\(this\)\.packages/;
+            if (regex.test(content)) {
+              content = content.replace(regex,
+                'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }');
+              patched = true;
+              console.log('Patched with regex');
+            }
+          }
+          
+          if (!patched) {
+            console.log('WARNING: Could not patch getPackages. Manual inspection needed.');
+            console.log('Full file content (first 2000 chars):');
+            console.log(content.slice(0, 2000));
+          }
+          
+          fs.writeFileSync(file, content);
+          console.log('Done');
+          "
 
       - name: Make Gradle wrapper executable
         run: chmod +x android/gradlew
@@ -83,7 +162,7 @@ jobs:
         env:
           GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      - name: Find APK files
+      - name: List APK files
         run: find android -name "*.apk" -type f
 
       - name: Upload Debug APK
