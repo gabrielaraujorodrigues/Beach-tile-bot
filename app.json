@@ -26,8 +26,7 @@
       "permissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.RECEIVE_BOOT_COMPLETED"
+        "android.permission.FOREGROUND_SERVICE"
       ]
     },
     "web": {
@@ -41,8 +40,7 @@
         }
       ],
       "expo-font",
-      "expo-web-browser",
-      "./plugins/withBotNativeModule"
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
