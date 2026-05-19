@@ -40,6 +40,7 @@ jobs:
           cp plugins/android-src/BotAccessibilityService.kt "$PKG/"
           cp plugins/android-src/BotModule.kt "$PKG/"
           cp plugins/android-src/BotPackage.kt "$PKG/"
+          cp plugins/android-src/BotForegroundService.kt "$PKG/"
           echo "Kotlin files:"
           ls "$PKG/"
 
@@ -63,18 +64,27 @@ jobs:
           if grep -q "SYSTEM_ALERT_WINDOW" "$MANIFEST"; then
             echo "Permissions already present"
           else
-            sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n</manifest>|' "$MANIFEST"
+            sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n</manifest>|' "$MANIFEST"
           fi
 
       - name: Patch AndroidManifest - accessibility service
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if grep -q "BotAccessibilityService" "$MANIFEST"; then
-            echo "Service already declared"
+            echo "Accessibility service already declared"
           else
             sed -i 's|</application>|        <service android:name=".BotAccessibilityService" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:label="Beach Tile Bot"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config"/></service>\n    </application>|' "$MANIFEST"
           fi
-          echo "Manifest after patch:"
+
+      - name: Patch AndroidManifest - foreground service
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if grep -q "BotForegroundService" "$MANIFEST"; then
+            echo "Foreground service already declared"
+          else
+            sed -i 's|</application>|        <service android:name=".BotForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />\n    </application>|' "$MANIFEST"
+          fi
+          echo "Final manifest:"
           cat "$MANIFEST"
 
       - name: Patch MainApplication.kt - register BotPackage
@@ -86,7 +96,7 @@ jobs:
           grep -A 6 "getPackages" "$MAIN" || true
 
       - name: Gradle build
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -60
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon 2>&1 | tail -80
         working-directory: android
         env:
           GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
