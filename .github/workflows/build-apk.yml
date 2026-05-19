@@ -40,19 +40,21 @@ jobs:
           cp plugins/android-src/BotAccessibilityService.kt "$PKG/"
           cp plugins/android-src/BotModule.kt "$PKG/"
           cp plugins/android-src/BotPackage.kt "$PKG/"
+          echo "Kotlin files:"
+          ls "$PKG/"
 
       - name: Copy accessibility XML
         run: |
           mkdir -p android/app/src/main/res/xml
           cp plugins/android-src/accessibility_service_config.xml android/app/src/main/res/xml/
 
-      - name: Add string resource
+      - name: Add accessibility string resource
         run: |
           FILE="android/app/src/main/res/values/strings.xml"
           if grep -q "accessibility_service_description" "$FILE" 2>/dev/null; then
             echo "String already exists"
           else
-            sed -i 's|</resources>|    <string name="accessibility_service_description">Beach Tile Bot automatiza cliques no Beach Tile Match para coletar recompensas.</string>\n</resources>|' "$FILE" || echo "Could not update strings.xml"
+            sed -i 's|</resources>|    <string name="accessibility_service_description">Beach Tile Bot automatiza cliques no Beach Tile Match para coletar recompensas.</string>\n</resources>|' "$FILE" || true
           fi
 
       - name: Patch AndroidManifest - permissions
@@ -64,7 +66,7 @@ jobs:
             sed -i 's|</manifest>|    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n</manifest>|' "$MANIFEST"
           fi
 
-      - name: Patch AndroidManifest - service
+      - name: Patch AndroidManifest - accessibility service
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if grep -q "BotAccessibilityService" "$MANIFEST"; then
@@ -72,24 +74,19 @@ jobs:
           else
             sed -i 's|</application>|        <service android:name=".BotAccessibilityService" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:label="Beach Tile Bot"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config"/></service>\n    </application>|' "$MANIFEST"
           fi
+          echo "Manifest after patch:"
+          cat "$MANIFEST"
 
-      - name: Patch MainApplication.kt
+      - name: Patch MainApplication.kt - register BotPackage
         run: |
           MAIN=$(find android -name "MainApplication.kt" | head -1)
-          node -e "
-            var fs=require('fs');
-            var c=fs.readFileSync('$MAIN','utf8');
-            if(c.includes('BotPackage')){console.log('already patched');process.exit(0);}
-            var old1='override fun getPackages(): List<ReactPackage> =\n          PackageList(this).packages';
-            var old2='override fun getPackages(): List<ReactPackage> = PackageList(this).packages';
-            var rep='override fun getPackages(): List<ReactPackage> { val packages=PackageList(this).packages; packages.add(BotPackage()); return packages }';
-            if(c.includes(old1)){c=c.replace(old1,rep);}else if(c.includes(old2)){c=c.replace(old2,rep);}else{c=c.replace(/override fun getPackages\(\): List<ReactPackage>[^{]*PackageList\(this\)\.packages/,rep);}
-            fs.writeFileSync('$MAIN',c);
-            console.log('patched');
-          "
+          echo "Patching: $MAIN"
+          python3 scripts/patch-main-app.py "$MAIN"
+          echo "Result:"
+          grep -A 6 "getPackages" "$MAIN" || true
 
       - name: Gradle build
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -60
         working-directory: android
         env:
           GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
