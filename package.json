@@ -5,9 +5,7 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "android": "expo run:android",
-    "prebuild": "expo prebuild --platform android --clean",
-    "build:apk": "cd android && ./gradlew assembleDebug"
+    "android": "expo run:android"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.0",
@@ -36,6 +34,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@expo/cli": "54.0.23",
+    "@expo/config-plugins": "^9.0.0",
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
   }
