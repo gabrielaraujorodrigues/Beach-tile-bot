@@ -43,20 +43,24 @@ class BotModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun startBot() {
-        val service = BotAccessibilityService.instance
-        if (service != null) {
-            service.startBot()
-        } else {
-            emitLog(
-                "Servico de Acessibilidade nao esta ativo. Ative nas configuracoes.",
-                "error"
-            )
+        val intent = Intent(reactContext, BotForegroundService::class.java).apply {
+            action = BotForegroundService.ACTION_START
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            reactContext.startForegroundService(intent)
+        } else {
+            reactContext.startService(intent)
+        }
+        emitLog("Servico em segundo plano iniciado!", "success")
     }
 
     @ReactMethod
     fun stopBot() {
-        BotAccessibilityService.instance?.stopBot()
+        val intent = Intent(reactContext, BotForegroundService::class.java).apply {
+            action = BotForegroundService.ACTION_STOP
+        }
+        reactContext.startService(intent)
+        emitLog("Parando bot...", "info")
     }
 
     @ReactMethod
@@ -124,10 +128,8 @@ class BotModule(private val reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun addListener(eventName: String) {
-    }
+    fun addListener(eventName: String) {}
 
     @ReactMethod
-    fun removeListeners(count: Int) {
-    }
+    fun removeListeners(count: Int) {}
 }
