@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout code
@@ -25,85 +25,70 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
-        working-directory: .
+        run: npm install --legacy-peer-deps
 
       - name: Install Expo CLI
         run: npm install -g @expo/cli@latest
 
       - name: Run Expo Prebuild (Android only)
         run: npx expo prebuild --platform android --clean
-        working-directory: artifacts/beach-tile-bot
         env:
           EXPO_NO_TELEMETRY: 1
 
       - name: Patch MainApplication.kt to register BotPackage
         run: |
-          MAIN_APP=$(find artifacts/beach-tile-bot/android -name "MainApplication.kt" | head -1)
-          echo "Found MainApplication at: $MAIN_APP"
-          if grep -q "BotPackage" "$MAIN_APP"; then
-            echo "BotPackage already registered"
-          else
-            sed -i 's/override fun getPackages(): List<ReactPackage> =\n.*PackageList(this).packages/override fun getPackages(): List<ReactPackage> { val packages = PackageList(this).packages; packages.add(BotPackage()); return packages }/' "$MAIN_APP" || true
-            python3 -c "
-import re, sys
-with open('$MAIN_APP', 'r') as f:
-    content = f.read()
-old = 'override fun getPackages(): List<ReactPackage> =\n          PackageList(this).packages'
-new = '''override fun getPackages(): List<ReactPackage> {
-          val packages = PackageList(this).packages
-          packages.add(BotPackage())
-          return packages
-        }'''
-if 'BotPackage' not in content:
-    content = content.replace(old, new)
-    # Try alternate format
-    old2 = 'override fun getPackages(): List<ReactPackage> = PackageList(this).packages'
-    content = content.replace(old2, new)
-    with open('$MAIN_APP', 'w') as f:
-        f.write(content)
-    print('Patched MainApplication.kt')
-else:
-    print('Already patched')
-"
-          fi
+          MAIN_APP=$(find android -name "MainApplication.kt" | head -1)
+          echo "MainApplication path: $MAIN_APP"
+          cat "$MAIN_APP" | grep -n "getPackages" || true
+          node -e "
+          const fs = require('fs');
+          const file = process.argv[1];
+          let content = fs.readFileSync(file, 'utf8');
+          if (content.includes('BotPackage')) {
+            console.log('BotPackage already registered');
+          } else {
+            const patterns = [
+              ['override fun getPackages(): List<ReactPackage> =\n          PackageList(this).packages',
+               'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'],
+              ['override fun getPackages(): List<ReactPackage> = PackageList(this).packages',
+               'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'],
+            ];
+            let patched = false;
+            for (const [old, replacement] of patterns) {
+              if (content.includes(old)) {
+                content = content.replace(old, replacement);
+                patched = true;
+                break;
+              }
+            }
+            if (!patched) {
+              // Regex fallback
+              content = content.replace(
+                /override fun getPackages\(\): List<ReactPackage> =[\s\S]*?PackageList\(this\)\.packages/,
+                'override fun getPackages(): List<ReactPackage> {\n          val packages = PackageList(this).packages\n          packages.add(BotPackage())\n          return packages\n        }'
+              );
+            }
+            fs.writeFileSync(file, content);
+            console.log('Patched:', file);
+          }
+          " "$MAIN_APP"
 
       - name: Make Gradle wrapper executable
-        run: chmod +x artifacts/beach-tile-bot/android/gradlew
+        run: chmod +x android/gradlew
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
-        working-directory: artifacts/beach-tile-bot/android
+        working-directory: android
         env:
           GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      - name: Find APK
-        run: find artifacts/beach-tile-bot/android -name "*.apk" -type f
+      - name: Find APK files
+        run: find android -name "*.apk" -type f
 
-      - name: Upload APK artifact
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: BeachTileBot-debug-apk
-          path: artifacts/beach-tile-bot/android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
-
-      - name: Build Release APK (unsigned)
-        run: ./gradlew assembleRelease --no-daemon
-        working-directory: artifacts/beach-tile-bot/android
-        env:
-          GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
-        continue-on-error: true
-
-      - name: Upload Release APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: BeachTileBot-release-apk
-          path: artifacts/beach-tile-bot/android/app/build/outputs/apk/release/app-release-unsigned.apk
-          retention-days: 30
-        continue-on-error: true
