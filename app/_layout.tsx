@@ -6,7 +6,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  useEffect(() => { SplashScreen.hideAsync(); }, []);
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
   return (
     <SafeAreaProvider>
       <Stack screenOptions={{ headerShown: false }} />
