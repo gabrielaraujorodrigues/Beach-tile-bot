@@ -9,6 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -84,8 +86,6 @@ jobs:
           else
             sed -i 's|</application>|        <service android:name=".BotForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />\n    </application>|' "$MANIFEST"
           fi
-          echo "Final manifest:"
-          cat "$MANIFEST"
 
       - name: Patch MainApplication.kt - register BotPackage
         run: |
@@ -94,20 +94,13 @@ jobs:
 
           if grep -q "BotPackage" "$MAIN"; then
             echo "Already patched"
-
           elif grep -q "packages.apply {" "$MAIN"; then
-            # Form: PackageList(this).packages.apply { ... }
-            # Insert add(BotPackage()) as first line inside the apply block
             sed -i 's|packages\.apply {|packages.apply {\n              add(BotPackage())|' "$MAIN"
             echo "Patched: .apply{} form"
-
           elif grep -q "val packages = PackageList(this).packages" "$MAIN"; then
-            # Form: val packages = ...; return packages
             sed -i '/val packages = PackageList(this)\.packages/a\          packages.add(BotPackage())' "$MAIN"
             echo "Patched: block form"
-
           elif grep -q "= PackageList(this).packages" "$MAIN"; then
-            # Form: single-expression = PackageList(this).packages
             python3 - "$MAIN" << 'PYEOF'
           import sys, re
           path = sys.argv[1]
@@ -128,7 +121,6 @@ jobs:
               f.write(new)
           print("Patched: single-expression form")
           PYEOF
-
           else
             echo "ERROR: Could not find getPackages pattern"
             cat "$MAIN"
@@ -136,7 +128,7 @@ jobs:
           fi
 
           echo "=== Result ==="
-          grep -A 6 "getPackages" "$MAIN" || true
+          grep -A 5 "getPackages" "$MAIN" || true
 
       - name: Gradle build
         run: |
@@ -147,14 +139,32 @@ jobs:
         env:
           GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
 
-      - name: Verificar APK gerado
+      - name: Renomear APK
         run: |
-          echo "Procurando APK..."
-          find android/app/build/outputs -name "*.apk" 2>/dev/null || echo "Nenhum APK encontrado"
+          cp android/app/build/outputs/apk/debug/app-debug.apk BeachTileBot.apk
+          echo "APK pronto: $(du -sh BeachTileBot.apk | cut -f1)"
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: BeachTileBot-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+      - name: Publicar Release com APK para download direto
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes 2>/dev/null || true
+          git tag -f latest
+          git push origin latest --force
+          gh release create latest BeachTileBot.apk \
+            --title "Beach Tile Bot - Versao mais recente" \
+            --notes "## Beach Tile Bot
+
+          Baixe e instale o APK no seu Android.
+
+          ### Como instalar:
+          1. Baixe o arquivo **BeachTileBot.apk**
+          2. Abra o arquivo no celular
+          3. Permita instalacao de fontes desconhecidas se solicitado
+          4. Instale e abra o app
+          5. Conceda as permissoes de Acessibilidade, Sobreposicao e Bateria
+
+          > Gerado automaticamente em $(date '+%d/%m/%Y %H:%M')" \
+            --latest
+          echo "Release publicado com sucesso!"
+          echo "Link de download: https://github.com/${{ github.repository }}/releases/download/latest/BeachTileBot.apk"
